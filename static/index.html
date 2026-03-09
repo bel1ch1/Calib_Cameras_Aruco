@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dual Camera Calibration</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 16px; background: #f5f5f5; }
+      h1 { margin-bottom: 16px; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; }
+      .panel { background: white; border-radius: 8px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+      img { width: 100%; border-radius: 8px; background: black; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+      button, select, input { padding: 6px 10px; }
+      .status { min-height: 20px; color: #0f5132; margin-top: 8px; }
+      .error { color: #842029; }
+      textarea { width: 100%; min-height: 120px; }
+      .small { font-size: 12px; color: #555; }
+    </style>
+  </head>
+  <body>
+    <h1>Dual-Camera Calibration</h1>
+    <div class="grid">
+      <div class="panel" id="cam0"></div>
+      <div class="panel" id="cam1"></div>
+    </div>
+    <script>
+      function panelTemplate(cameraId) {
+        return `
+          <h2>Camera ${cameraId}</h2>
+          <img src="/stream/${cameraId}" alt="Camera ${cameraId} stream"/>
+          <div class="row">
+            <label>Target:</label>
+            <select id="target-${cameraId}">
+              <option value="checkerboard">Checkerboard 7x7</option>
+              <option value="charuco">ChArUco</option>
+            </select>
+            <button onclick="startSession(${cameraId})">Start</button>
+          </div>
+          <div class="row">
+            <button onclick="captureSnapshot(${cameraId})">Capture snapshot</button>
+            <button onclick="deleteAllSnapshots(${cameraId})">Delete all snapshots</button>
+            <button onclick="cancelCalibration(${cameraId})">Cancel</button>
+            <button onclick="finishCalibration(${cameraId})">Finish calibration</button>
+          </div>
+          <div class="small">Snapshots: <span id="count-${cameraId}">0</span></div>
+          <div class="status" id="status-${cameraId}"></div>
+          <textarea id="result-${cameraId}" readonly></textarea>
+          <div class="row">
+            <button onclick="copyResult(${cameraId})">Copy result</button>
+            <button onclick="downloadFile(${cameraId}, 'json')">Download JSON</button>
+            <button onclick="downloadFile(${cameraId}, 'npz')">Download NPZ</button>
+          </div>
+        `;
+      }
+
+      function setStatus(cameraId, message, isError = false) {
+        const el = document.getElementById(`status-${cameraId}`);
+        el.textContent = message;
+        el.className = isError ? "status error" : "status";
+      }
+
+      async function api(url, options = {}) {
+        const res = await fetch(url, options);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || data.message || "Request failed");
+        return data;
+      }
+
+      async function refreshSession(cameraId) {
+        try {
+          const data = await api(`/sessions/${cameraId}`);
+          document.getElementById(`count-${cameraId}`).textContent = data.snapshot_count || 0;
+        } catch (e) {
+          setStatus(cameraId, e.message, true);
+        }
+      }
+
+      async function startSession(cameraId) {
+        const target = document.getElementById(`target-${cameraId}`).value;
+        const body = {
+          target_type: target,
+          checkerboard_rows: 7,
+          checkerboard_cols: 7,
+          square_size_m: 0.041,
+          charuco_squares_x: 5,
+          charuco_squares_y: 7,
+          charuco_square_length: 0.04,
+          charuco_marker_length: 0.02,
+          charuco_dictionary: "DICT_4X4_50"
+        };
+        try {
+          await api(`/sessions/${cameraId}/start`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+          });
+          setStatus(cameraId, "Calibration session started.");
+          refreshSession(cameraId);
+        } catch (e) {
+          setStatus(cameraId, e.message, true);
+        }
+      }
+
+      async function captureSnapshot(cameraId) {
+        try {
+          const data = await api(`/sessions/${cameraId}/capture`, { method: "POST" });
+          document.getElementById(`count-${cameraId}`).textContent = data.snapshot_count || 0;
+          setStatus(cameraId, data.message || "Snapshot saved.");
+        } catch (e) {
+          setStatus(cameraId, e.message, true);
+        }
+      }
+
+      async function deleteAllSnapshots(cameraId) {
+        try {
+          const data = await api(`/sessions/${cameraId}/delete-all`, { method: "POST" });
+          document.getElementById(`count-${cameraId}`).textContent = data.snapshot_count || 0;
+          setStatus(cameraId, data.message || "Snapshots deleted.");
+        } catch (e) {
+          setStatus(cameraId, e.message, true);
+        }
+      }
+
+      async function cancelCalibration(cameraId) {
+        try {
+          const data = await api(`/sessions/${cameraId}/cancel`, { method: "POST" });
+          setStatus(cameraId, data.message || "Calibration cancelled.");
+        } catch (e) {
+          setStatus(cameraId, e.message, true);
+        }
+      }
+
+      async function finishCalibration(cameraId) {
+        const target = document.getElementById(`target-${cameraId}`).value;
+        const body = {
+          settings: {
+            target_type: target,
+            checkerboard_rows: 7,
+            checkerboard_cols: 7,
+            square_size_m: 0.041,
+            charuco_squares_x: 5,
+            charuco_squares_y: 7,
+            charuco_square_length: 0.04,
+            charuco_marker_length: 0.02,
+            charuco_dictionary: "DICT_4X4_50"
+          }
+        };
+        try {
+          const data = await api(`/sessions/${cameraId}/finish`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+          });
+          const resultText = JSON.stringify(data.result, null, 2);
+          document.getElementById(`result-${cameraId}`).value = resultText;
+          setStatus(cameraId, data.message || "Calibration complete.");
+        } catch (e) {
+          setStatus(cameraId, e.message, true);
+        }
+      }
+
+      function copyResult(cameraId) {
+        const text = document.getElementById(`result-${cameraId}`).value;
+        navigator.clipboard.writeText(text)
+          .then(() => setStatus(cameraId, "Result copied to clipboard."))
+          .catch(() => setStatus(cameraId, "Failed to copy result.", true));
+      }
+
+      function downloadFile(cameraId, kind) {
+        window.open(`/download/${cameraId}/${kind}`, "_blank");
+      }
+
+      document.getElementById("cam0").innerHTML = panelTemplate(0);
+      document.getElementById("cam1").innerHTML = panelTemplate(1);
+      refreshSession(0);
+      refreshSession(1);
+    </script>
+  </body>
+  </html>
+
