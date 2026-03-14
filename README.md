@@ -67,16 +67,20 @@ For each camera panel (`Camera 0` and `Camera 1`):
 ## Calibration usage
 
 1. Select calibration target (Checkerboard or ChArUco) for a camera panel.
-2. Click `Start`.
-3. Position calibration board in multiple poses.
-4. Click `Capture snapshot` repeatedly (at least 6 usable images).
-5. Click `Finish calibration`.
-6. Copy matrix/distortion from UI, or download JSON/NPZ files.
+2. Set board size in `n x n` format and physical sizes:
+   - Checkerboard: `n x n` means printed squares count; OpenCV automatically converts this to inner corners `(n-1) x (n-1)`.
+   - ChArUco: set board `n x n`, square size, and marker size.
+3. Click `Start`.
+4. Position calibration board in multiple poses.
+5. Click `Capture snapshot` repeatedly (at least 6 usable images).
+6. Click `Finish calibration`.
+7. Copy matrix/distortion from UI, or download JSON/NPZ files.
 
 ## Notes
 
 - Checkerboard default follows `newCalibrationParameters.py`: `7x7` inner corners, `0.041 m` square size.
-- If your board dimensions differ, extend the UI or API payload values before finishing calibration.
+- For a standard chessboard with `8x8` printed squares, use `7x7` inner corners in OpenCV (already set as default).
+- The UI accepts board dimensions in `n x n` format (examples: `8x8`, `6x6`).
 - Ensure both cameras are available as Picamera2 camera indices `0` and `1`.
 
 ## Output files

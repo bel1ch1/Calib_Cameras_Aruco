@@ -32,10 +32,25 @@
           <div class="row">
             <label>Target:</label>
             <select id="target-${cameraId}">
-              <option value="checkerboard">Checkerboard 7x7</option>
+              <option value="checkerboard">Checkerboard (8x8 squares / 7x7 corners)</option>
               <option value="charuco">ChArUco</option>
             </select>
             <button onclick="startSession(${cameraId})">Start</button>
+          </div>
+          <div class="small">Use board format as n x n (example: 8x8 or 6x6).</div>
+          <div class="row">
+            <label>Checkerboard squares (n x n):</label>
+            <input id="checkerboard-grid-${cameraId}" value="8x8" />
+            <label>Square size (m):</label>
+            <input id="checkerboard-square-size-${cameraId}" value="0.041" />
+          </div>
+          <div class="row">
+            <label>ChArUco board (n x n):</label>
+            <input id="charuco-grid-${cameraId}" value="7x7" />
+            <label>Square size (m):</label>
+            <input id="charuco-square-size-${cameraId}" value="0.04" />
+            <label>Marker size (m):</label>
+            <input id="charuco-marker-size-${cameraId}" value="0.02" />
           </div>
           <div class="row">
             <button onclick="captureSnapshot(${cameraId})">Capture snapshot</button>
@@ -76,20 +91,77 @@
         }
       }
 
-      async function startSession(cameraId) {
+      function parseNxN(cameraId, value, fieldName) {
+        const match = String(value).trim().match(/^(\d+)\s*[xX]\s*(\d+)$/);
+        if (!match) {
+          throw new Error(`${fieldName} must be in n x n format (example: 8x8).`);
+        }
+        const nRows = Number(match[1]);
+        const nCols = Number(match[2]);
+        if (nRows < 2 || nCols < 2) {
+          throw new Error(`${fieldName} values must be at least 2.`);
+        }
+        return { nRows, nCols };
+      }
+
+      function readPositiveFloat(value, fieldName) {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          throw new Error(`${fieldName} must be a positive number.`);
+        }
+        return parsed;
+      }
+
+      function buildSettingsFromInputs(cameraId) {
         const target = document.getElementById(`target-${cameraId}`).value;
-        const body = {
+
+        const checkerboardGrid = parseNxN(
+          cameraId,
+          document.getElementById(`checkerboard-grid-${cameraId}`).value,
+          "Checkerboard grid"
+        );
+        const checkerboardSquareSize = readPositiveFloat(
+          document.getElementById(`checkerboard-square-size-${cameraId}`).value,
+          "Checkerboard square size"
+        );
+
+        const charucoGrid = parseNxN(
+          cameraId,
+          document.getElementById(`charuco-grid-${cameraId}`).value,
+          "ChArUco grid"
+        );
+        const charucoSquareSize = readPositiveFloat(
+          document.getElementById(`charuco-square-size-${cameraId}`).value,
+          "ChArUco square size"
+        );
+        const charucoMarkerSize = readPositiveFloat(
+          document.getElementById(`charuco-marker-size-${cameraId}`).value,
+          "ChArUco marker size"
+        );
+
+        // Checkerboard in OpenCV uses inner corners, so n x n squares becomes (n-1) x (n-1) corners.
+        const checkerboardRows = checkerboardGrid.nRows - 1;
+        const checkerboardCols = checkerboardGrid.nCols - 1;
+        if (checkerboardRows < 2 || checkerboardCols < 2) {
+          throw new Error("Checkerboard must be at least 3x3 squares.");
+        }
+
+        return {
           target_type: target,
-          checkerboard_rows: 7,
-          checkerboard_cols: 7,
-          square_size_m: 0.041,
-          charuco_squares_x: 5,
-          charuco_squares_y: 7,
-          charuco_square_length: 0.04,
-          charuco_marker_length: 0.02,
+          checkerboard_rows: checkerboardRows,
+          checkerboard_cols: checkerboardCols,
+          square_size_m: checkerboardSquareSize,
+          charuco_squares_x: charucoGrid.nRows,
+          charuco_squares_y: charucoGrid.nCols,
+          charuco_square_length: charucoSquareSize,
+          charuco_marker_length: charucoMarkerSize,
           charuco_dictionary: "DICT_4X4_50"
         };
+      }
+
+      async function startSession(cameraId) {
         try {
+          const body = buildSettingsFromInputs(cameraId);
           await api(`/sessions/${cameraId}/start`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -132,21 +204,8 @@
       }
 
       async function finishCalibration(cameraId) {
-        const target = document.getElementById(`target-${cameraId}`).value;
-        const body = {
-          settings: {
-            target_type: target,
-            checkerboard_rows: 7,
-            checkerboard_cols: 7,
-            square_size_m: 0.041,
-            charuco_squares_x: 5,
-            charuco_squares_y: 7,
-            charuco_square_length: 0.04,
-            charuco_marker_length: 0.02,
-            charuco_dictionary: "DICT_4X4_50"
-          }
-        };
         try {
+          const body = { settings: buildSettingsFromInputs(cameraId) };
           const data = await api(`/sessions/${cameraId}/finish`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
