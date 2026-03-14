@@ -16,6 +16,20 @@
       .error { color: #842029; }
       textarea { width: 100%; min-height: 120px; }
       .small { font-size: 12px; color: #555; }
+      .busy-indicator { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: #1f2937; }
+      .hidden { display: none; }
+      .spinner {
+        width: 14px;
+        height: 14px;
+        border: 2px solid #d1d5db;
+        border-top: 2px solid #2563eb;
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
     </style>
   </head>
   <body>
@@ -59,6 +73,10 @@
             <button onclick="finishCalibration(${cameraId})">Finish calibration</button>
           </div>
           <div class="small">Snapshots: <span id="count-${cameraId}">0</span></div>
+          <div class="busy-indicator hidden" id="busy-${cameraId}">
+            <span class="spinner"></span>
+            <span id="busy-text-${cameraId}">Processing...</span>
+          </div>
           <div class="status" id="status-${cameraId}"></div>
           <textarea id="result-${cameraId}" readonly></textarea>
           <div class="row">
@@ -73,6 +91,18 @@
         const el = document.getElementById(`status-${cameraId}`);
         el.textContent = message;
         el.className = isError ? "status error" : "status";
+      }
+
+      function setBusy(cameraId, isBusy, text = "Processing...") {
+        const panel = document.getElementById(`cam${cameraId}`);
+        const busy = document.getElementById(`busy-${cameraId}`);
+        const busyText = document.getElementById(`busy-text-${cameraId}`);
+        busyText.textContent = text;
+        busy.classList.toggle("hidden", !isBusy);
+
+        panel.querySelectorAll("button, select, input").forEach((el) => {
+          el.disabled = isBusy;
+        });
       }
 
       async function api(url, options = {}) {
@@ -160,6 +190,7 @@
       }
 
       async function startSession(cameraId) {
+        setBusy(cameraId, true, "Starting calibration session...");
         try {
           const body = buildSettingsFromInputs(cameraId);
           await api(`/sessions/${cameraId}/start`, {
@@ -171,39 +202,52 @@
           refreshSession(cameraId);
         } catch (e) {
           setStatus(cameraId, e.message, true);
+        } finally {
+          setBusy(cameraId, false);
         }
       }
 
       async function captureSnapshot(cameraId) {
+        setBusy(cameraId, true, "Saving snapshot...");
         try {
           const data = await api(`/sessions/${cameraId}/capture`, { method: "POST" });
           document.getElementById(`count-${cameraId}`).textContent = data.snapshot_count || 0;
           setStatus(cameraId, data.message || "Snapshot saved.");
         } catch (e) {
           setStatus(cameraId, e.message, true);
+        } finally {
+          setBusy(cameraId, false);
         }
       }
 
       async function deleteAllSnapshots(cameraId) {
+        setBusy(cameraId, true, "Deleting all snapshots...");
         try {
           const data = await api(`/sessions/${cameraId}/delete-all`, { method: "POST" });
           document.getElementById(`count-${cameraId}`).textContent = data.snapshot_count || 0;
           setStatus(cameraId, data.message || "Snapshots deleted.");
         } catch (e) {
           setStatus(cameraId, e.message, true);
+        } finally {
+          setBusy(cameraId, false);
         }
       }
 
       async function cancelCalibration(cameraId) {
+        setBusy(cameraId, true, "Cancelling calibration...");
         try {
           const data = await api(`/sessions/${cameraId}/cancel`, { method: "POST" });
           setStatus(cameraId, data.message || "Calibration cancelled.");
         } catch (e) {
           setStatus(cameraId, e.message, true);
+        } finally {
+          setBusy(cameraId, false);
         }
       }
 
       async function finishCalibration(cameraId) {
+        setBusy(cameraId, true, "Calibration in progress, please wait...");
+        setStatus(cameraId, "Calibration in progress...");
         try {
           const body = { settings: buildSettingsFromInputs(cameraId) };
           const data = await api(`/sessions/${cameraId}/finish`, {
@@ -216,6 +260,8 @@
           setStatus(cameraId, data.message || "Calibration complete.");
         } catch (e) {
           setStatus(cameraId, e.message, true);
+        } finally {
+          setBusy(cameraId, false);
         }
       }
 
