@@ -16,6 +16,53 @@ def _load_images(snapshot_dir: Path) -> List[Path]:
     return sorted(snapshot_dir.glob("*.png"))
 
 
+def _detect_checkerboard_corners(gray: np.ndarray, checkerboard_size: Tuple[int, int]):
+    """
+    Robust checkerboard detection with multiple OpenCV methods and pre-processing fallbacks.
+    Returns (ret, corners).
+    """
+    base_flags = cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
+    fast_flags = base_flags | cv2.CALIB_CB_FAST_CHECK
+
+    # Try modern SB detector first if available (often much more robust).
+    if hasattr(cv2, "findChessboardCornersSB"):
+        try:
+            ret, corners = cv2.findChessboardCornersSB(
+                gray,
+                checkerboard_size,
+                flags=cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY | cv2.CALIB_CB_NORMALIZE_IMAGE,
+            )
+            if ret:
+                return ret, corners
+        except Exception:
+            pass
+
+    # Classic detector on original image.
+    ret, corners = cv2.findChessboardCorners(gray, checkerboard_size, base_flags)
+    if ret:
+        return ret, corners
+
+    # Fallbacks for difficult lighting/contrast cases.
+    gray_eq = cv2.equalizeHist(gray)
+    ret, corners = cv2.findChessboardCorners(gray_eq, checkerboard_size, base_flags)
+    if ret:
+        return ret, corners
+
+    gray_blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    ret, corners = cv2.findChessboardCorners(gray_blur, checkerboard_size, base_flags)
+    if ret:
+        return ret, corners
+
+    gray_inv = cv2.bitwise_not(gray)
+    ret, corners = cv2.findChessboardCorners(gray_inv, checkerboard_size, base_flags)
+    if ret:
+        return ret, corners
+
+    # Last quick check to avoid full failure on borderline frames.
+    ret, corners = cv2.findChessboardCorners(gray, checkerboard_size, fast_flags)
+    return ret, corners
+
+
 def _save_outputs(camera_id: int, payload: Dict, raw: Dict) -> Dict[str, str]:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     json_path = OUTPUT_DIR / f"calibration_cam{camera_id}.json"
@@ -57,17 +104,19 @@ def calibrate_checkerboard(
     imgpoints = []
     image_size = None
 
+    detected_files = []
     for path in image_paths:
         img = cv2.imread(str(path))
         if img is None:
             continue
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         image_size = gray.shape[::-1]
-        ret, corners = cv2.findChessboardCorners(gray, checkerboard_size, None)
+        ret, corners = _detect_checkerboard_corners(gray, checkerboard_size)
         if ret:
             objpoints.append(objp)
             corners2 = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
             imgpoints.append(corners2)
+            detected_files.append(path.name)
 
     if len(objpoints) < MIN_IMAGES_FOR_CALIBRATION:
         raise ValueError(
@@ -84,6 +133,7 @@ def calibrate_checkerboard(
         "target_type": "checkerboard",
         "valid_images": len(objpoints),
         "total_images": len(image_paths),
+        "detected_files": detected_files,
         "reprojection_error": float(ret),
         "camera_matrix": _as_serializable_array(camera_matrix),
         "dist_coeffs": _as_serializable_array(dist_coeffs),
