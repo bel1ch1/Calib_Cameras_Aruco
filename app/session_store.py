@@ -66,7 +66,9 @@ class SessionStore:
         session.snapshot_dir.mkdir(parents=True, exist_ok=True)
         index = session.snapshot_count + 1
         file_path = session.snapshot_dir / f"snapshot_{index:04d}.png"
-        if not cv2.imwrite(str(file_path), frame):
+        # cv2.imwrite expects BGR ordering, convert from RGB camera frame.
+        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        if not cv2.imwrite(str(file_path), frame_bgr):
             raise RuntimeError("Failed to save snapshot to disk.")
         session.status = "capturing"
         session.message = f"Snapshot saved: {file_path.name}"

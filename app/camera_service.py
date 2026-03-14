@@ -40,12 +40,15 @@ class CameraService:
         frame_rgb = cam.capture_array()
         if frame_rgb is None:
             raise CameraError(f"No frame received from camera {camera_id}.")
-        return cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+        # Keep RGB as the canonical output format from the camera service.
+        return frame_rgb
 
     def mjpeg_generator(self, camera_id: int) -> Generator[bytes, None, None]:
         while True:
-            frame = self.capture_frame(camera_id)
-            ok, encoded = cv2.imencode(".jpg", frame)
+            frame_rgb = self.capture_frame(camera_id)
+            # OpenCV JPEG encoder expects BGR channel order.
+            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+            ok, encoded = cv2.imencode(".jpg", frame_bgr)
             if not ok:
                 continue
             yield (
